@@ -46,19 +46,21 @@
 | Component | Package | Version |
 |---|---|---|
 | Framework | `laravel/laravel` | ^11.0 |
-| Livewire | `livewire/livewire` | ^3.0 (class-based only, NO Volt) |
-| Auth scaffold | `laravel/breeze` | Livewire stack |
+| Livewire | `livewire/livewire` | ^3.6 (class-based only) |
+| Auth scaffold | `laravel/breeze` | Livewire stack (require-dev) |
 | CSS | Tailwind CSS | via Vite |
 | JS | Alpine.js | bundled with Livewire |
 | Icons | `blade-ui-kit/blade-heroicons` | ^2.7 |
 | Roles | `spatie/laravel-permission` | ^6.25 |
 | API tokens | `laravel/sanctum` | ^4.3 |
 | Realtime | `laravel/reverb` | ^1.10 (installed, not active) |
+| Volt | `livewire/volt` | ^1.7.0 (installed, **tidak digunakan**) |
 | Database | MySQL | ULID primary keys |
-| PHP | | ^8.3 |
+| PHP | | ^8.2 |
 | Font | Inter | via Bunny Fonts CDN |
 
-**NOT used**: Redis, Inertia, Vue, React, Volt, Spatie Media Library, Horizon, Telescope, S3, dark mode.
+**NOT used**: Redis, Inertia, Vue, React, Spatie Media Library, Horizon, Telescope, S3, dark mode.
+> **Catatan Volt**: Package `livewire/volt` terinstall di `composer.json` namun tidak ada satu pun komponen Volt (`.blade.php` dengan `<?php`) yang digunakan. Seluruh codebase menggunakan class-based Livewire.
 
 ---
 
@@ -129,7 +131,10 @@ primary-100: #e0f2fe    primary-600: #0284c7
 primary-200: #bae6fd    primary-700: #0369a1
 primary-300: #7dd3fc    primary-800: #075985
 primary-400: #38bdf8    primary-900: #0c4a6e
+                         primary-950: #082f49
 ```
+
+**Tailwind Plugins**: `@tailwindcss/forms` dan `@tailwindcss/typography` keduanya diaktifkan di `tailwind.config.js`.
 
 **How to rebrand**: Change color values in `tailwind.config.js` → `theme.extend.colors.primary`, then `npm run build`.
 
@@ -324,7 +329,9 @@ PermissionGroup::ActivityLogs // 'activity-logs'
 PermissionGroup::Media        // 'media'
 ```
 
-**When to add new enums**: Create in `app/Enums/` for any new status field or grouped constants. Always include `label()` and `color()` methods for UI display.
+> **Catatan**: `PermissionGroup` adalah pure string enum — tidak memiliki `label()` atau `color()` method. Enum ini digunakan sebagai konstanta kelompok permission, bukan untuk tampilan UI langsung.
+
+**When to add new enums**: Create in `app/Enums/` for any new status field or grouped constants. Untuk enum yang ditampilkan di UI (badge, filter), tambahkan `label()` dan `color()` methods seperti pada `UserStatus`.
 
 ---
 
@@ -522,8 +529,10 @@ confirmDelete(string $id): void     // Opens confirm modal
 cancelDelete(): void                // Closes modal
 executeDelete(): void               // Calls performDelete(), then cancelDelete()
 
-abstract performDelete(string $id): void  // YOU MUST IMPLEMENT THIS
+abstract performDelete(string $id): void  // Harus diimplementasikan di subclass
 ```
+
+> **Catatan penting**: `BaseDataTable` sudah menyediakan implementasi **default** dari `performDelete()` yang melakukan `Model::findOrFail($id)->delete()`. Jika Anda extend `BaseDataTable`, Anda **tidak perlu** mengimplementasikannya kecuali butuh logika kustom (misal: hapus file, cascade logic, dll). Jika extend langsung dari `Component`, maka wajib implementasi sendiri.
 
 **Flow**: User clicks Delete → `confirmDelete($id)` → dispatches `open-confirm-modal` → ConfirmModal opens → User clicks Confirm → dispatches `delete-confirmed` → your component catches with `#[On('delete-confirmed')]` → calls `performDelete($id)`.
 
@@ -535,7 +544,7 @@ abstract performDelete(string $id): void  // YOU MUST IMPLEMENT THIS
 
 **File**: `app/Traits/Models/HasActivityLog.php`
 
-Auto-logs `created`, `updated`, `deleted` events on the model.
+Auto-logs `created`, `updated`, `deleted` events on the model menggunakan Eloquent model events via `bootHasActivityLog()`.
 
 ```php
 // In your model:
@@ -544,14 +553,17 @@ use HasActivityLog;
 protected array $logAttributes = ['name', 'status', 'price'];
 
 // To disable logging temporarily:
-$model->disableActivityLog = true;
+$model->disableActivityLog = true;  // public bool, default false
 $model->save();
+$model->disableActivityLog = false;
 ```
 
 **What it logs automatically**:
-- `created` → records all tracked attributes
-- `updated` → records old vs new values (diff) for tracked attributes only
+- `created` → records all tracked attributes as `['attributes' => [...]]`
+- `updated` → records `['old' => [...], 'new' => [...]]` — hanya jika ada perubahan pada `$logAttributes`
 - `deleted` → records all tracked attributes at time of deletion
+
+> **Catatan**: Jika `$logAttributes` kosong atau tidak didefinisikan di model, tidak ada yang di-log (returns `[]`).
 
 ---
 
@@ -571,13 +583,16 @@ abstract protected function getView(): string;
 // PROVIDED:
 getRowsProperty(): LengthAwarePaginator
     // Calls getQuery() → applyFilters() → applySorting() → paginate()
+    // Diakses di view sebagai $this->rows (Livewire computed property)
 
 performDelete(string $id): void
     // Default: finds model and deletes. Override for custom logic.
 
 render(): mixed
-    // Returns view with 'rows' variable
+    // Returns view($this->getView(), ['rows' => $this->rows])
 ```
+
+> **Tentang `$rows` di view**: `getRowsProperty()` adalah Livewire **computed property**. Di view, Anda mengaksesnya sebagai `$rows` (bukan `$this->rows`). Livewire otomatis mengekspos computed properties ke view.
 
 **Usage** (see Section 30 for full example):
 ```php
@@ -632,6 +647,8 @@ close(): void                  // Sets isOpen=false, calls onClose()
 onOpen(mixed ...$params): void
 onClose(): void
 ```
+
+> **Catatan**: `BaseModal` tidak memiliki method `render()` abstract. Setiap subclass yang extend `BaseModal` **wajib mendefinisikan `render()` sendiri** sesuai standar Livewire Component.
 
 ### BaseStatsWidget
 
@@ -1055,8 +1072,20 @@ public function handleDeleteConfirmed(string $id): void
 
 **File**: `app/Livewire/Components/GlobalSearch.php`
 
-Top-bar search that queries users by name/email. Shows up to 5 results.
-Extend the `search()` method to add more model queries for new modules.
+Top-bar search yang query User berdasarkan name/email. Menampilkan maksimal 5 hasil. Pencarian dimulai setelah minimal **2 karakter** (`strlen($query) < 2` → skip).
+
+```php
+// Properties
+public string $query = '';   // wire:model bindable
+public array $results = [];  // array of: [id, name, email, type, url]
+
+// Methods
+updatedQuery(): void    // Auto-triggers search() when query changes
+search(): void          // Queries DB, populate $results
+clear(): void           // Resets query + results
+```
+
+**Untuk menambah module lain ke search**: Update method `search()` dan tambahkan query ke `$this->results` array dengan format yang sama (`id`, `name`, `email`, `type`, `url`).
 
 ---
 
@@ -1097,7 +1126,7 @@ Centered card layout for login, register, forgot password, etc.
 
 **File**: `resources/views/layouts/partials/sidebar.blade.php`
 
-Navigation items with permission gates:
+Navigation items dengan permission gates (di dalam `<nav>`):
 
 | Menu Item | Route | Permission Guard |
 |---|---|---|
@@ -1106,9 +1135,14 @@ Navigation items with permission gates:
 | Roles & Permissions | `roles.index` | `@can('view roles')` |
 | Settings | `settings.index` | `@can('view settings')` |
 | Activity Logs | `activity-logs.index` | `@can('view activity-logs')` |
-| Profile | `profile.edit` | none |
 
-**Active state**: `request()->routeIs('users.*')` → adds `.active` class.
+**User section** (di luar `<nav>`, di bagian bawah sidebar):
+- Link ke `profile.edit` — menampilkan avatar inisial + nama + role user
+- Tombol Logout via `<form method="POST" action="{{ route('logout') }}">` (tanpa Livewire)
+
+> **Catatan**: Profile **bukan** bagian dari `<nav>` utama. Profile diletakkan di area user section yang terpisah di bawah sidebar, setelah border separator.
+
+**Active state**: `request()->routeIs('users.*')` → adds `.active` class to sidebar link.
 
 ---
 
@@ -1118,30 +1152,34 @@ Navigation items with permission gates:
 **View**: `resources/views/livewire/dashboard/dashboard-index.blade.php`
 **Route**: `GET /dashboard` → `dashboard`
 
+> **Arsitektur**: `DashboardIndex` extends `BaseStatsWidget`. Method `render()` di-override untuk me-load layout dan pass `$stats`. Data "Recent Activity" dan "Latest Users" di-query **langsung di Blade view** menggunakan `@php` inline (bukan dari component PHP).
+
 **Features**:
-- 4 stat cards: Total Users, Active Users, Total Roles, Activity Logs
-- Recent Activity card (latest 5 activity logs)
-- Latest Users card (latest 5 users)
+- 4 stat cards: Total Users, Active Users, Roles (Total), Activity Logs (Total)
+- Recent Activity card: 5 log terbaru (`ActivityLog::with('user')->latest()->limit(5)->get()`)
+- Latest Users card: 5 user terbaru (`User::latest()->limit(5)->get()`)
 
 ---
 
 ## 18. Module: User Management
 
 **Components**:
-| Component | Route | Permission |
-|---|---|---|
-| `UserIndex` | `GET /users` | `view users` |
-| `UserCreate` | `GET /users/create` | `create users` |
-| `UserEdit` | `GET /users/{user}/edit` | `edit users` |
+| Component | Base Class | Route | Auth in mount() |
+|---|---|---|---|
+| `UserIndex` | `BaseDataTable` | `GET /users` | `authorize('viewAny', User::class)` |
+| `UserCreate` | `BaseForm` | `GET /users/create` | `authorize('create', User::class)` |
+| `UserEdit` | `BaseForm` | `GET /users/{user}/edit` | `authorize('update', $user)` |
 
 **UserIndex features**:
-- Extends `BaseDataTable`
+- Extends `BaseDataTable` — memiliki semua filter/sort/bulk/toast/delete bawaan
 - Search by name + email
-- Filter by status (active/inactive/suspended) and role
-- Sort by created_at (default desc)
-- Bulk select + bulk delete
-- Action dropdown per row: Edit, Delete
-- Delete confirmation modal
+- Filter by status (`filters['status']`) dan role (`filters['role']`)
+- Sort by `created_at` (default `desc`)
+- Bulk select + `bulkDelete()` (skip self)
+- Delete via `handleDeleteConfirmed()` listener + `authorize('delete', $user)` per item
+- Passes `$statuses` (UserStatus::cases()) dan `$roles` (Role::pluck) ke view
+
+**UserCreate/UserEdit**: Menggunakan `UserService` untuk create/update. Setelah save, redirect ke `users.index`.
 
 ---
 
@@ -1149,12 +1187,14 @@ Navigation items with permission gates:
 
 **Component**: `app/Livewire/Roles/RoleIndex.php`
 **Route**: `GET /roles` → `roles.index`
-**Permission**: `view roles`
+
+> **Authorization**: `mount()` menggunakan `$this->authorize('viewAny', User::class)` (bukan `@can('view roles')`). Update permission menggunakan `$this->authorize('edit roles')` di method `updateRole()`.
 
 **Features**:
-- Lists all roles with assigned permissions
-- Inline permission toggle (checkbox) per role
-- Permissions grouped by category (users, roles, settings, etc.)
+- Lists all roles dengan assigned permissions
+- Inline permission editing per role (klik Edit → checkbox muncul → Save)
+- Permissions digroup berdasarkan kata kedua dari nama permission (misal: `view users` → group `users`)
+- `cancelEdit()` untuk membatalkan editing
 
 ---
 
@@ -1162,13 +1202,15 @@ Navigation items with permission gates:
 
 **Component**: `app/Livewire/Settings/SettingIndex.php`
 **Route**: `GET /settings` → `settings.index`
-**Permission**: `view settings`, `edit settings`
+
+> **Authorization**: `mount()` menggunakan `$this->authorize('view settings')`. Method `save()` menggunakan `$this->authorize('edit settings')`.
 
 **Features**:
-- Key-value settings management
-- Grouped by category
-- Supports types: string, boolean, integer, json
-- Uses `SettingService` for CRUD
+- Load settings dari group `'general'` via `SettingService::getGroup('general')`
+- Default values: `site_name`, `site_description`, `maintenance_mode` jika DB kosong
+- `$formData` array di-bind ke form input
+- `save()` memanggil `SettingService::setMany($this->formData)`
+- Supports types: string, boolean, integer, json (casting di model Setting)
 
 ---
 
@@ -1176,13 +1218,15 @@ Navigation items with permission gates:
 
 **Component**: `app/Livewire/ActivityLogs/ActivityLogIndex.php`
 **Route**: `GET /activity-logs` → `activity-logs.index`
-**Permission**: `view activity-logs`
+
+> **Arsitektur**: **Tidak** extend `BaseDataTable`. Langsung extend `Component`, menggunakan trait `HasFilters` + `HasSorting` saja. Query dijalankan di method `render()` secara inline.
 
 **Features**:
 - Read-only log viewer
-- Search by event, description, user name
-- Sort by event, created_at
-- Color-coded event badges (created=green, updated=blue, deleted=red)
+- Search by `event`, `description`, atau nama user (`whereHas('user', ...)`) — menggunakan OR condition
+- Sort menggunakan `HasSorting::applySorting()`
+- Paginasi menggunakan `$this->perPage` dari `HasFilters`
+- Data di-pass ke view sebagai `$logs` (bukan `$rows`)
 
 ---
 
@@ -1190,12 +1234,15 @@ Navigation items with permission gates:
 
 **Component**: `app/Livewire/Profile/ProfileEdit.php`
 **Route**: `GET /profile` → `profile.edit`
-**Permission**: none (own profile only)
+
+> **Arsitektur**: Tidak extend `BaseForm`. Langsung extend `Component`, menggunakan trait `HasToast` + `WithFileUploads`.
 
 **Features**:
-- Update name and email
-- Upload/change avatar
-- Change password (requires current password verification)
+- `updateProfile()`: Update name + email via `UserService::update()`
+- `uploadAvatar()`: Upload avatar (max 2MB, image only) via `UserService::uploadAvatar()`
+- `updatePassword()`: Verify `current_password` dengan `Hash::check()` → update langsung via `Auth::user()->update()` (tanpa UserService)
+
+> **Catatan**: Password update di Profile **tidak** menggunakan `UserService` — dilakukan langsung di component menggunakan `Auth::user()->update(['password' => Hash::make(...)])`.
 
 ---
 
@@ -1246,13 +1293,15 @@ Route::apiResource('products', ProductController::class);
 
 **File**: `app/Http/Middleware/EnsureUserIsActive.php`
 
-**Registered in**: `bootstrap/app.php` → web middleware group
+**Registered in**: `bootstrap/app.php`
+- Web group: `$middleware->web(append: [EnsureUserIsActive::class])` → append di akhir
+- API group: `$middleware->api(prepend: [EnsureFrontendRequestsAreStateful::class])` → prepend di awal
 
 **Behavior**:
-- Skips if user is not logged in (guest)
-- If `status !== UserStatus::Active`:
-  - **Web**: logs out, invalidates session, redirects to login with error message
-  - **API** (JSON): returns `403 { "message": "Your account is not active." }`
+- Skips if user is not logged in (guest) — lanjut `$next($request)`
+- Jika `status !== UserStatus::Active` (enum comparison):
+  - **API** (`expectsJson()`): returns `403 { "message": "Your account is not active." }`
+  - **Web**: `auth()->logout()` + `session()->invalidate()` + `session()->regenerateToken()` → redirect ke `login` dengan `with('error', '...')`
 
 ---
 
@@ -1315,10 +1364,10 @@ Media:        view media, upload media, delete media
 
 | Field | Value |
 |---|---|
-| Name | Super Admin |
+| Name | `Daffa` |
 | Email | `daffatgi02@gmail.com` |
 | Password | `daffa123` |
-| Role | super-admin |
+| Role | `super-admin` |
 
 ### Adding Permissions for a New Module
 
@@ -1355,32 +1404,42 @@ format_relative(Carbon|string $date): string
 
 | File | Key | Value |
 |---|---|---|
+| `.env` | `APP_NAME` | `"Starter"` |
 | `.env` | `APP_TIMEZONE` | `Asia/Jakarta` (WIB) |
 | `.env` | `APP_LOCALE` | `id` |
 | `.env` | `APP_FAKER_LOCALE` | `id_ID` |
 | `.env` | `CACHE_STORE` | `database` |
 | `.env` | `QUEUE_CONNECTION` | `database` |
 | `.env` | `SESSION_DRIVER` | `database` |
+| `.env` | `BROADCAST_CONNECTION` | `reverb` |
 | `config/permission.php` | `cache.store` | `array` |
-| `bootstrap/app.php` | web middleware | `EnsureUserIsActive` |
-| `bootstrap/app.php` | api middleware | `EnsureFrontendRequestsAreStateful` |
+| `bootstrap/app.php` | web middleware (append) | `EnsureUserIsActive` |
+| `bootstrap/app.php` | api middleware (prepend) | `EnsureFrontendRequestsAreStateful` |
+| `tailwind.config.js` | plugins | `@tailwindcss/forms`, `@tailwindcss/typography` |
 
-### AppServiceProvider Boot
+### AppServiceProvider
 
 ```php
+// register():
+$this->app->bind(UserRepositoryInterface::class, UserRepository::class);
+
+// boot():
 config(['app.locale' => 'id']);
 Carbon::setLocale('id');
-Model::shouldBeStrict(! app()->isProduction());
+Model::shouldBeStrict(! app()->isProduction()); // Strict mode hanya di non-production
 Paginator::useTailwind();
+
+// Note: Ada commented-out hook untuk multi-timezone:
+// date_default_timezone_set(auth()->user()?->timezone ?? config('app.timezone'));
 ```
 
 ---
 
 ## 29. Testing
 
-**Tests: 47 passed, 99 assertions**
+> **Catatan**: Jalankan `php artisan test` untuk melihat jumlah test dan assertions terkini. Jumlah dapat berubah seiring pengembangan.
 
-| Test File | Tests |
+| Test File | Deskripsi |
 |---|---|
 | `Feature/Auth/AuthenticationTest` | login screen, login success, login fail, dashboard render, logout |
 | `Feature/Auth/LoginTest` | login page render, valid login, invalid login, auth redirect |
@@ -1393,6 +1452,8 @@ Paginator::useTailwind();
 | `Feature/Users/UserCrudTest` | view list, create page, no permission, dashboard, roles, settings, activity logs, unauthenticated |
 | `Feature/Api/UserApiTest` | API login, /me, list users, unauthenticated 401, invalid login 401, logout |
 | `Unit/Services/UserServiceTest` | create with role, update, suspend, activate, delete, hash password |
+| `Feature/ExampleTest` | Laravel default example test |
+| `Unit/ExampleTest` | Laravel default example test |
 
 Run `php artisan test` to verify.
 
@@ -1486,11 +1547,13 @@ Route::get('products', ProductIndex::class)->name('products.index');
 
 When cloning for a new client:
 
-1. `APP_NAME` in `.env` → client project name
-2. Logo in `resources/views/layouts/partials/sidebar.blade.php`
+1. `APP_NAME` in `.env` → client project name (saat ini: `"Starter"`)
+2. Logo/inisial di `resources/views/layouts/partials/sidebar.blade.php` (saat ini: huruf `S`)
 3. Primary color tokens in `tailwind.config.js` → `theme.extend.colors.primary`
-4. Seed credentials in `database/seeders/DatabaseSeeder.php`
-5. Run `npm run build` after color changes
+4. Update seed credentials di `database/seeders/DatabaseSeeder.php` (email, password, name)
+5. Update `DB_DATABASE` di `.env` → nama database baru
+6. Run `npm run build` setelah color changes
+7. Run `php artisan migrate:fresh --seed` untuk inisialisasi database baru
 
 ---
 
@@ -1514,6 +1577,8 @@ app/
 │   └── Resources/
 │       └── UserResource.php          # API JSON resource
 ├── Livewire/
+│   ├── Actions/
+│   │   └── Logout.php            # Livewire action untuk logout (dari Breeze)
 │   ├── Base/
 │   │   ├── BaseDataTable.php     # Abstract: table with filter/sort/bulk/toast/delete
 │   │   ├── BaseForm.php          # Abstract: form with validation/toast
@@ -1525,6 +1590,8 @@ app/
 │   │   └── GlobalSearch.php      # Top-bar search
 │   ├── Dashboard/
 │   │   └── DashboardIndex.php    # Stats + recent activity + latest users
+│   ├── Forms/
+│   │   └── LoginForm.php         # Livewire form class untuk login (dari Breeze)
 │   ├── Users/
 │   │   ├── UserIndex.php         # User list table
 │   │   ├── UserCreate.php        # Create user form page
@@ -1613,4 +1680,4 @@ resources/views/
 
 ---
 
-> **Last verified**: All 47 tests passing, `npm run build` successful, `php artisan migrate:fresh --seed` clean.
+> **Last verified**: 10 April 2026 — `npm run build` successful, `php artisan migrate:fresh --seed` clean.
