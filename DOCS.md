@@ -46,7 +46,7 @@
 | Component | Package | Version |
 |---|---|---|
 | Framework | `laravel/laravel` | ^11.0 |
-| Livewire | `livewire/livewire` | ^3.6 (class-based only) |
+| Livewire | `livewire/livewire` | ^3.6 (class-based untuk semua modul) |
 | Auth scaffold | `laravel/breeze` | Livewire stack (require-dev) |
 | CSS | Tailwind CSS | via Vite |
 | JS | Alpine.js | bundled with Livewire |
@@ -54,13 +54,15 @@
 | Roles | `spatie/laravel-permission` | ^6.25 |
 | API tokens | `laravel/sanctum` | ^4.3 |
 | Realtime | `laravel/reverb` | ^1.10 (installed, not active) |
-| Volt | `livewire/volt` | ^1.7.0 (installed, **tidak digunakan**) |
+| Volt | `livewire/volt` | ^1.7.0 (digunakan **hanya** untuk auth pages) |
 | Database | MySQL | ULID primary keys |
 | PHP | | ^8.2 |
 | Font | Inter | via Bunny Fonts CDN |
 
 **NOT used**: Redis, Inertia, Vue, React, Spatie Media Library, Horizon, Telescope, S3, dark mode.
-> **Catatan Volt**: Package `livewire/volt` terinstall di `composer.json` namun tidak ada satu pun komponen Volt (`.blade.php` dengan `<?php`) yang digunakan. Seluruh codebase menggunakan class-based Livewire.
+> **Aturan Volt**: Package `livewire/volt` digunakan **hanya** untuk halaman auth (login, register, forgot-password, reset-password, verify-email, confirm-password) yang merupakan Volt single-file components di `resources/views/livewire/pages/auth/`. **Semua modul baru wajib menggunakan class-based Livewire** — jangan membuat Volt component baru di luar auth flow.
+
+> **Catatan Breeze**: Seluruh Blade components bawaan Breeze (`x-text-input`, `x-primary-button`, dll.) telah dihapus. Auth pages menggunakan custom components (`x-form.*`, `x-ui.*`) yang sama dengan seluruh modul internal — memastikan konsistensi desain di seluruh aplikasi.
 
 ---
 
@@ -1120,7 +1122,12 @@ Includes:
 
 **File**: `resources/views/layouts/guest.blade.php`
 
-Centered card layout for login, register, forgot password, etc.
+Centered card layout for login, register, forgot password, etc. Auth pages menggunakan custom components (`x-form.input`, `x-ui.button`) — konsisten dengan desain modul internal. Session status feedback menggunakan toast system (bukan `x-auth-session-status`).
+
+Includes:
+- `<livewire:components.flash-toast />` — agar toast dari auth pages (misalnya "Password reset link sent") dapat ditampilkan
+
+> **Catatan**: Route `/` (root URL) di-redirect langsung ke `/login`. File `welcome.blade.php` dan seluruh Breeze blade components telah dihapus demi konsistensi.
 
 ### Sidebar
 
@@ -1172,12 +1179,13 @@ Navigation items dengan permission gates (di dalam `<nav>`):
 
 **UserIndex features**:
 - Extends `BaseDataTable` — memiliki semua filter/sort/bulk/toast/delete bawaan
+- **Override `render()`** untuk mengirim data tambahan `$statuses` (UserStatus::cases()) dan `$roles` (Role::pluck) ke view, selain `$rows` bawaan BaseDataTable
 - Search by name + email
 - Filter by status (`filters['status']`) dan role (`filters['role']`)
 - Sort by `created_at` (default `desc`)
 - Bulk select + `bulkDelete()` (skip self)
-- Delete via `handleDeleteConfirmed()` listener + `authorize('delete', $user)` per item
-- Passes `$statuses` (UserStatus::cases()) dan `$roles` (Role::pluck) ke view
+- Delete via `handleDeleteConfirmed()` listener → memanggil `performDelete($id)` yang melakukan `authorize('delete', $user)` + `UserService::delete()`
+- Override `performDelete()` dari BaseDataTable karena perlu authorize per-item dan menggunakan UserService
 
 **UserCreate/UserEdit**: Menggunakan `UserService` untuk create/update. Setelah save, redirect ke `users.index`.
 
@@ -1258,7 +1266,7 @@ All endpoints are prefixed with `/api/v1/`.
 |---|---|---|---|
 | POST | `/api/v1/login` | No | Returns Sanctum token |
 | POST | `/api/v1/logout` | Sanctum | Revokes current token |
-| GET | `/api/v1/me` | Sanctum | Returns authenticated user + roles |
+| GET | `/api/v1/me` | Sanctum | Returns user (inline JSON, **bukan** UserResource — tidak ada `avatar_url`, `created_at`, `updated_at`) |
 
 ### User CRUD Endpoints
 
@@ -1569,6 +1577,8 @@ app/
 ├── Http/
 │   ├── Controllers/
 │   │   ├── Controller.php        # Base with AuthorizesRequests
+│   │   ├── Auth/
+│   │   │   └── VerifyEmailController.php  # Email verification handler
 │   │   └── Api/V1/
 │   │       ├── AuthController.php    # login, logout, me
 │   │       └── UserController.php    # CRUD with authorize()
@@ -1578,7 +1588,7 @@ app/
 │       └── UserResource.php          # API JSON resource
 ├── Livewire/
 │   ├── Actions/
-│   │   └── Logout.php            # Livewire action untuk logout (dari Breeze)
+│   │   └── Logout.php            # Livewire action untuk logout (dipakai verify-email page)
 │   ├── Base/
 │   │   ├── BaseDataTable.php     # Abstract: table with filter/sort/bulk/toast/delete
 │   │   ├── BaseForm.php          # Abstract: form with validation/toast
@@ -1591,9 +1601,9 @@ app/
 │   ├── Dashboard/
 │   │   └── DashboardIndex.php    # Stats + recent activity + latest users
 │   ├── Forms/
-│   │   └── LoginForm.php         # Livewire form class untuk login (dari Breeze)
+│   │   └── LoginForm.php         # Livewire form class untuk login (Volt)
 │   ├── Users/
-│   │   ├── UserIndex.php         # User list table
+│   │   ├── UserIndex.php         # User list table (overrides render + performDelete)
 │   │   ├── UserCreate.php        # Create user form page
 │   │   └── UserEdit.php          # Edit user form page
 │   ├── Roles/
@@ -1632,7 +1642,7 @@ app/
         └── HasActivityLog.php    # Auto-log created/updated/deleted
 
 resources/views/
-├── components/
+├── components/                   # HANYA custom components (Breeze components sudah dihapus)
 │   ├── ui/                       # 15 UI components
 │   │   ├── button.blade.php      # variant, size, type, href, icon
 │   │   ├── icon.blade.php        # Heroicon wrapper: name, style, size
@@ -1662,7 +1672,7 @@ resources/views/
 │       └── bulk-bar.blade.php    # Bulk action bar
 ├── layouts/
 │   ├── app.blade.php             # Authenticated layout (sidebar + topbar)
-│   ├── guest.blade.php           # Auth pages layout
+│   ├── guest.blade.php           # Auth pages layout (centered card)
 │   └── partials/
 │       ├── sidebar.blade.php     # Navigation + user info + logout
 │       ├── topbar.blade.php      # Search + user dropdown
@@ -1675,9 +1685,17 @@ resources/views/
     ├── activity-logs/
     ├── profile/
     ├── components/
-    └── base/
+    ├── base/
+    └── pages/
+        └── auth/                 # Volt single-file auth components
+            ├── login.blade.php
+            ├── register.blade.php
+            ├── forgot-password.blade.php
+            ├── reset-password.blade.php
+            ├── verify-email.blade.php
+            └── confirm-password.blade.php
 ```
 
 ---
 
-> **Last verified**: 10 April 2026 — `npm run build` successful, `php artisan migrate:fresh --seed` clean.
+> **Last verified**: 13 April 2026 — Breeze components dihapus, auth pages refactored ke custom components, dead code cleaned up, docs synchronized dengan codebase.

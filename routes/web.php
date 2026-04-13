@@ -12,7 +12,7 @@ use App\Livewire\Users\UserEdit;
 use App\Livewire\Users\UserIndex;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome');
+Route::redirect('/', '/login');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', DashboardIndex::class)->name('dashboard');

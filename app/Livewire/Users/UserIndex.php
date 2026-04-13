@@ -48,21 +48,16 @@ class UserIndex extends BaseDataTable
     #[On('delete-confirmed')]
     public function handleDeleteConfirmed(string $id): void
     {
-        $this->executeDeleteById($id);
+        $this->performDelete($id);
     }
 
-    protected function executeDeleteById(string $id): void
+    protected function performDelete(string $id): void
     {
         $user = User::findOrFail($id);
         $this->authorize('delete', $user);
 
         app(UserService::class)->delete($user);
         $this->dispatchSuccess('User deleted successfully.');
-    }
-
-    protected function performDelete(string $id): void
-    {
-        $this->executeDeleteById($id);
     }
 
     public function bulkDelete(): void

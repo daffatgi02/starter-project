@@ -28,6 +28,8 @@
         </div>
     </div>
 
+    <livewire:components.flash-toast />
+
     @livewireScripts
 </body>
 </html>

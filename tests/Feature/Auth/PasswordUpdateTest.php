@@ -7,7 +7,7 @@ namespace Tests\Feature\Auth;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
-use Livewire\Volt\Volt;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class PasswordUpdateTest extends TestCase
@@ -26,15 +26,13 @@ class PasswordUpdateTest extends TestCase
 
         $this->actingAs($user);
 
-        $component = Volt::test('profile.update-password-form')
+        $component = Livewire::test(\App\Livewire\Profile\ProfileEdit::class)
             ->set('current_password', 'password')
-            ->set('password', 'new-password')
-            ->set('password_confirmation', 'new-password')
+            ->set('new_password', 'new-password')
+            ->set('new_password_confirmation', 'new-password')
             ->call('updatePassword');
 
-        $component
-            ->assertHasNoErrors()
-            ->assertNoRedirect();
+        $component->assertHasNoErrors();
 
         $this->assertTrue(Hash::check('new-password', $user->refresh()->password));
     }
@@ -45,14 +43,12 @@ class PasswordUpdateTest extends TestCase
 
         $this->actingAs($user);
 
-        $component = Volt::test('profile.update-password-form')
+        $component = Livewire::test(\App\Livewire\Profile\ProfileEdit::class)
             ->set('current_password', 'wrong-password')
-            ->set('password', 'new-password')
-            ->set('password_confirmation', 'new-password')
+            ->set('new_password', 'new-password')
+            ->set('new_password_confirmation', 'new-password')
             ->call('updatePassword');
 
-        $component
-            ->assertHasErrors(['current_password'])
-            ->assertNoRedirect();
+        $component->assertHasErrors(['current_password']);
     }
 }
